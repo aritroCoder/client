@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import json
+import asyncio
+import os
 
 import httpx
 from aiohttp import web
@@ -26,6 +27,7 @@ class ProxyServer:
         self._used = 0
         self._on_tokens_used = on_tokens_used
         self._runner: web.AppRunner | None = None
+        self._tunnel_url: str | None = None
 
     def _verify_auth(self, request: web.Request) -> bool:
         if self._provider == "openai":
@@ -118,12 +120,37 @@ class ProxyServer:
             )
         return app
 
-    async def start(self, host: str = "127.0.0.1", port: int = 9100) -> None:
+    async def start(self, host: str = "127.0.0.1", port: int = 9100) -> str:
         self._runner = web.AppRunner(self._create_app())
         await self._runner.setup()
         site = web.TCPSite(self._runner, host, port)
         await site.start()
 
+        self._tunnel_url = await asyncio.to_thread(self._create_tunnel, port)
+        return self._tunnel_url
+
+    @staticmethod
+    def _create_tunnel(port: int) -> str:
+        from pyngrok import ngrok
+
+        auth_token = os.environ.get("NGROK_AUTHTOKEN", "")
+        if auth_token:
+            ngrok.set_auth_token(auth_token)
+        tunnel = ngrok.connect(str(port), "http")
+        return tunnel.public_url
+
     async def stop(self) -> None:
+        if self._tunnel_url:
+            await asyncio.to_thread(self._disconnect_tunnel, self._tunnel_url)
+            self._tunnel_url = None
         if self._runner:
             await self._runner.cleanup()
+
+    @staticmethod
+    def _disconnect_tunnel(url: str) -> None:
+        from pyngrok import ngrok
+
+        try:
+            ngrok.disconnect(url)
+        except Exception:
+            pass

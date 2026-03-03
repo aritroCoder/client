@@ -18,6 +18,7 @@ class ExchangeConfig:
     want_model: str
     api_key: str
     proxy_port: int = 9100
+    proxy_url: str = ""
 
     def register_message(self) -> dict:
         return {
@@ -27,8 +28,7 @@ class ExchangeConfig:
             "tokens_offered": self.tokens_offered,
             "want_provider": self.want_provider,
             "want_model": self.want_model,
-            "proxy_host": "127.0.0.1",
-            "proxy_port": self.proxy_port,
+            "proxy_url": self.proxy_url,
         }
 
 
@@ -36,8 +36,7 @@ class ExchangeConfig:
 class PairingInfo:
     offer_id: str
     temp_key: str
-    peer_host: str
-    peer_port: int
+    peer_url: str
     peer_provider: str
     peer_model: str
     tokens_granted: int
@@ -48,8 +47,7 @@ class PairingInfo:
         return cls(
             offer_id=msg["offer_id"],
             temp_key=msg["temp_key"],
-            peer_host=msg["peer_host"],
-            peer_port=msg["peer_port"],
+            peer_url=msg["peer_url"],
             peer_provider=msg["peer_provider"],
             peer_model=msg["peer_model"],
             tokens_granted=msg["tokens_granted"],

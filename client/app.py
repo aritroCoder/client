@@ -211,7 +211,6 @@ class StatusScreen(Screen):
         from client.proxy import ProxyServer
 
         server_url = os.environ.get("TOKENHUB_SERVER", "ws://localhost:8080") + "/ws"
-        self.status_text = "Connecting to server..."
 
         proxy = ProxyServer(
             provider=self.config.provider,
@@ -223,6 +222,11 @@ class StatusScreen(Screen):
         )
 
         try:
+            self.status_text = "Starting proxy and ngrok tunnel..."
+            tunnel_url = await proxy.start("127.0.0.1", self.config.proxy_port)
+            self.config.proxy_url = tunnel_url
+
+            self.status_text = "Connecting to server..."
             async with aiohttp.ClientSession() as session:
                 async with session.ws_connect(server_url) as ws:
                     await ws.send_json(self.config.register_message())
@@ -238,16 +242,14 @@ class StatusScreen(Screen):
                                 self._pairing = PairingInfo.from_message(data)
                                 self.tokens_serve_limit = self._pairing.tokens_to_serve
                                 self.tokens_use_limit = self._pairing.tokens_granted
-                                self.status_text = f"[green]Paired! Peer: {self._pairing.peer_provider}/{self._pairing.peer_model}[/]"
-                                self._update_table()
 
                                 proxy._temp_key = self._pairing.temp_key
                                 proxy._budget = self._pairing.tokens_to_serve
-                                await proxy.start("127.0.0.1", self.config.proxy_port)
+
                                 self.status_text = (
-                                    f"[green]Paired! Proxy running on "
-                                    f"127.0.0.1:{self.config.proxy_port}[/]"
+                                    f"[green]Paired! Proxy: {tunnel_url}[/]"
                                 )
+                                self._update_table()
 
                             elif data["type"] == "error":
                                 self.status_text = f"[red]Error: {data['message']}[/]"
