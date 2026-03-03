@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 
 import httpx
@@ -18,15 +19,15 @@ class ProxyServer:
         api_key: str,
         temp_key: str,
         token_budget: int,
-        on_tokens_used,
+        on_tokens_served,
     ) -> None:
         self._provider = provider
         self._model = model
         self._api_key = api_key
         self._temp_key = temp_key
         self._budget = token_budget
-        self._used = 0
-        self._on_tokens_used = on_tokens_used
+        self._served = 0
+        self._on_tokens_served = on_tokens_served
         self._runner: web.AppRunner | None = None
         self._tunnel_url: str | None = None
 
@@ -41,7 +42,15 @@ class ProxyServer:
         return False
 
     def _budget_exceeded(self) -> bool:
-        return self._used >= self._budget
+        return self._served >= self._budget
+
+    def _verify_model(self, body: bytes) -> bool:
+        try:
+            data = json.loads(body)
+        except (json.JSONDecodeError, ValueError):
+            return True
+        model = data.get("model", self._model)
+        return model == self._model
 
     async def _forward_and_track(
         self, request: web.Request, url: str, extra_headers: dict | None = None
@@ -52,6 +61,11 @@ class ProxyServer:
             return web.json_response({"error": "Token budget exhausted"}, status=429)
 
         body = await request.read()
+        if not self._verify_model(body):
+            return web.json_response(
+                {"error": f"Only model '{self._model}' is available on this proxy"},
+                status=400,
+            )
         config = PROVIDER_CONFIG[self._provider]
         headers = {
             "Content-Type": "application/json",
@@ -64,11 +78,11 @@ class ProxyServer:
             resp = await client.post(url, content=body, headers=headers)
 
         resp_data = resp.json()
-        tokens = self._extract_tokens(resp_data)
+        tokens = self._extract_tokens(resp_data, self._provider)
         if tokens > 0:
-            self._used += tokens
-            if self._on_tokens_used:
-                await self._on_tokens_used(tokens)
+            self._served += tokens
+            if self._on_tokens_served:
+                await self._on_tokens_served(tokens)
 
         return web.Response(
             body=resp.content,
@@ -76,15 +90,16 @@ class ProxyServer:
             content_type="application/json",
         )
 
-    def _extract_tokens(self, data: dict) -> int:
+    @staticmethod
+    def _extract_tokens(data: dict, provider: str) -> int:
         try:
-            if self._provider == "openai":
+            if provider == "openai":
                 usage = data.get("usage", {})
                 return usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
-            elif self._provider == "anthropic":
+            elif provider == "anthropic":
                 usage = data.get("usage", {})
                 return usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
-            elif self._provider == "gemini":
+            elif provider == "gemini":
                 usage = data.get("usage_metadata", {})
                 return usage.get("prompt_token_count", 0) + usage.get(
                     "candidates_token_count", 0
@@ -103,9 +118,14 @@ class ProxyServer:
 
     async def _handle_gemini(self, request: web.Request) -> web.Response:
         model = request.match_info.get("model", self._model)
+        if model != self._model:
+            return web.json_response(
+                {"error": f"Only model '{self._model}' is available on this proxy"},
+                status=400,
+            )
         url = (
             f"{PROVIDER_CONFIG['gemini']['base_url']}"
-            f"/v1beta/models/{model}:generateContent"
+            f"/v1beta/models/{self._model}:generateContent"
         )
         return await self._forward_and_track(request, url)
 
