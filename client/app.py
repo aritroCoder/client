@@ -161,11 +161,7 @@ import requests
 
 resp = requests.post(
     "{peer_url}/v1/messages",
-    headers={{
-        "x-api-key": "{temp_key}",
-        "content-type": "application/json",
-        "anthropic-version": "2023-06-01",
-    }},
+    headers={{"x-api-key": "{temp_key}", "content-type": "application/json"}},
     json={{
         "model": "{model}",
         "max_tokens": 256,
@@ -203,6 +199,7 @@ class StatusScreen(Screen):
         super().__init__()
         self.config = config
         self._pairing: PairingInfo | None = None
+        self._ws: aiohttp.ClientWebSocketResponse | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -298,8 +295,19 @@ class StatusScreen(Screen):
     def watch_tokens_used(self) -> None:
         self._update_table()
 
-    async def on_proxy_tokens_used(self, count: int) -> None:
+    async def on_proxy_tokens_served(self, count: int) -> None:
         self.tokens_served += count
+        if self._pairing and self._ws:
+            try:
+                await self._ws.send_json(
+                    {
+                        "type": "usage_report",
+                        "offer_id": self._pairing.offer_id,
+                        "tokens": count,
+                    }
+                )
+            except Exception:
+                pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if not self._pairing:
@@ -332,7 +340,7 @@ class StatusScreen(Screen):
             api_key=self.config.api_key,
             temp_key="",
             token_budget=0,
-            on_tokens_used=self.on_proxy_tokens_used,
+            on_tokens_served=self.on_proxy_tokens_served,
         )
 
         try:
@@ -343,6 +351,7 @@ class StatusScreen(Screen):
             self.status_text = "Connecting to server..."
             async with aiohttp.ClientSession() as session:
                 async with session.ws_connect(server_url) as ws:
+                    self._ws = ws
                     await ws.send_json(self.config.register_message())
 
                     async for msg in ws:
@@ -368,6 +377,9 @@ class StatusScreen(Screen):
                             elif data["type"] == "error":
                                 self.status_text = f"[red]Error: {data['message']}[/]"
 
+                            elif data["type"] == "usage_update":
+                                self.tokens_used += data.get("tokens", 0)
+
                         elif msg.type in (
                             aiohttp.WSMsgType.CLOSE,
                             aiohttp.WSMsgType.CLOSING,
@@ -376,6 +388,7 @@ class StatusScreen(Screen):
                             break
 
             self.status_text = "Disconnected"
+            self._ws = None
         except Exception as e:
             self.status_text = f"[red]Connection failed: {e}[/]"
         finally:
