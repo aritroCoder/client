@@ -1,0 +1,51 @@
+Screen {
+    align: center middle;
+}
+
+Header {
+    dock: top;
+}
+
+Footer {
+    dock: bottom;
+}
+
+#main-container {
+    width: 70;
+    border: round $primary;
+    padding: 1 2;
+    background: $surface;
+}
+
+Select,
+Input,
+Button {
+    width: 100%;
+    margin: 1 0;
+}
+
+.title {
+    text-align: center;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.status-text {
+    text-align: center;
+}
+
+.error-text {
+    color: $error;
+    text-align: center;
+}
+
+.success-text {
+    color: $success;
+    text-align: center;
+}
+
+DataTable {
+    height: auto;
+    max-height: 15;
+    margin: 1 0;
+}
