@@ -100,9 +100,9 @@ class ProxyServer:
                 usage = data.get("usage", {})
                 return usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
             elif provider == "gemini":
-                usage = data.get("usage_metadata", {})
-                return usage.get("prompt_token_count", 0) + usage.get(
-                    "candidates_token_count", 0
+                usage = data.get("usageMetadata", {})
+                return usage.get("promptTokenCount", 0) + usage.get(
+                    "candidatesTokenCount", 0
                 )
         except (AttributeError, TypeError):
             pass
