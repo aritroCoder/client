@@ -59,6 +59,7 @@ class ExchangeConfig:
 class PairingInfo:
     offer_id: str
     temp_key: str
+    proxy_key: str
     peer_url: str
     peer_provider: str
     peer_model: str
@@ -70,6 +71,7 @@ class PairingInfo:
         return cls(
             offer_id=msg["offer_id"],
             temp_key=msg["temp_key"],
+            proxy_key=msg["proxy_key"],
             peer_url=msg["peer_url"],
             peer_provider=msg["peer_provider"],
             peer_model=msg["peer_model"],

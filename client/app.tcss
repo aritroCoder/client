@@ -18,8 +18,12 @@ Footer {
 }
 
 Select,
-Input,
-Button {
+Input {
+    width: 100%;
+    margin: 1 0;
+}
+
+#main-container Button {
     width: 100%;
     margin: 1 0;
 }
@@ -44,8 +48,50 @@ Button {
     text-align: center;
 }
 
+#status-layout {
+    width: 100%;
+    height: 1fr;
+    padding: 1 2;
+}
+
+#left-pane {
+    width: 1fr;
+    border: round $primary;
+    padding: 1 2;
+    background: $surface;
+}
+
+#right-pane {
+    width: 1fr;
+    border: round $success;
+    padding: 1 2;
+    background: $surface;
+    margin-left: 1;
+}
+
 DataTable {
     height: auto;
     max-height: 15;
+    margin: 1 0;
+}
+
+#code-snippet {
+    height: 1fr;
+    margin: 1 0;
+}
+
+#copy-buttons {
+    width: 100%;
+    height: auto;
+    margin: 1 0;
+}
+
+#copy-buttons Button {
+    width: 1fr;
+    margin: 0 1;
+}
+
+#copy-code-btn {
+    width: 100%;
     margin: 1 0;
 }

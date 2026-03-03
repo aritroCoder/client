@@ -6,10 +6,19 @@ import os
 
 import aiohttp
 from textual.app import App, ComposeResult
-from textual.containers import Container
+from textual.containers import Container, Horizontal, Vertical
 from textual.reactive import reactive
 from textual.screen import Screen
-from textual.widgets import Button, DataTable, Footer, Header, Input, Select, Static
+from textual.widgets import (
+    Button,
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    Select,
+    Static,
+    TextArea,
+)
 from textual import work
 
 from client.api import validate_key
@@ -131,6 +140,56 @@ class KeyScreen(Screen):
             btn.disabled = False
 
 
+def _make_snippet(provider: str, model: str, peer_url: str, temp_key: str) -> str:
+    if provider == "openai":
+        return f'''\
+import requests
+
+resp = requests.post(
+    "{peer_url}/v1/chat/completions",
+    headers={{"Authorization": "Bearer {temp_key}"}},
+    json={{
+        "model": "{model}",
+        "messages": [{{"role": "user", "content": "What is the capital of France?"}}],
+    }},
+)
+print(resp.json()["choices"][0]["message"]["content"])
+'''
+    elif provider == "anthropic":
+        return f'''\
+import requests
+
+resp = requests.post(
+    "{peer_url}/v1/messages",
+    headers={{
+        "x-api-key": "{temp_key}",
+        "content-type": "application/json",
+        "anthropic-version": "2023-06-01",
+    }},
+    json={{
+        "model": "{model}",
+        "max_tokens": 256,
+        "messages": [{{"role": "user", "content": "What is the capital of France?"}}],
+    }},
+)
+print(resp.json()["content"][0]["text"])
+'''
+    elif provider == "gemini":
+        return f'''\
+import requests
+
+resp = requests.post(
+    "{peer_url}/v1beta/models/{model}:generateContent",
+    headers={{"x-goog-api-key": "{temp_key}"}},
+    json={{
+        "contents": [{{"parts": [{{"text": "What is the capital of France?"}}]}}],
+    }},
+)
+print(resp.json()["candidates"][0]["content"]["parts"][0]["text"])
+'''
+    return "# Unknown provider"
+
+
 class StatusScreen(Screen):
     BINDINGS = [("q", "app.quit", "Quit")]
 
@@ -147,10 +206,25 @@ class StatusScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Container(id="main-container"):
-            yield Static("TokenHub - Active", classes="title")
-            yield Static(self.status_text, id="status", classes="status-text")
-            yield DataTable(id="info-table")
+        with Horizontal(id="status-layout"):
+            with Vertical(id="left-pane"):
+                yield Static("TokenHub - Active", classes="title")
+                yield Static(self.status_text, id="status", classes="status-text")
+                yield DataTable(id="info-table")
+                with Horizontal(id="copy-buttons"):
+                    yield Button("Copy Peer URL", id="copy-url-btn", variant="primary")
+                    yield Button("Copy Temp Key", id="copy-key-btn", variant="primary")
+            with Vertical(id="right-pane"):
+                yield Static("Quick Start", classes="title")
+                yield TextArea(
+                    "# Waiting for pairing...",
+                    language="python",
+                    theme="monokai",
+                    read_only=True,
+                    show_line_numbers=False,
+                    id="code-snippet",
+                )
+                yield Button("Copy Code", id="copy-code-btn", variant="success")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -164,13 +238,19 @@ class StatusScreen(Screen):
                 ("Served / Limit", "0 / -"),
                 ("Used / Limit", "0 / -"),
                 ("Peer", "-"),
+                ("Peer URL", "-"),
+                ("Temp Key", "-"),
             ]
         )
+        self.query_one("#copy-buttons", Horizontal).display = False
+        self.query_one("#right-pane", Vertical).display = False
         self.connect_and_run()
 
     def _update_table(self) -> None:
         table = self.query_one("#info-table", DataTable)
         table.clear()
+        peer_url = self._pairing.peer_url if self._pairing else "-"
+        temp_key = self._pairing.temp_key if self._pairing else "-"
         table.add_rows(
             [
                 ("Offering", f"{self.config.provider}/{self.config.model}"),
@@ -190,8 +270,21 @@ class StatusScreen(Screen):
                     if self._pairing
                     else "-",
                 ),
+                ("Peer URL", peer_url),
+                ("Temp Key", temp_key),
             ]
         )
+        if self._pairing:
+            self.query_one("#copy-buttons", Horizontal).display = True
+            self.query_one("#right-pane", Vertical).display = True
+            snippet = _make_snippet(
+                self._pairing.peer_provider,
+                self._pairing.peer_model,
+                self._pairing.peer_url,
+                self._pairing.temp_key,
+            )
+            code_area = self.query_one("#code-snippet", TextArea)
+            code_area.load_text(snippet)
 
     def watch_status_text(self) -> None:
         try:
@@ -207,6 +300,25 @@ class StatusScreen(Screen):
 
     async def on_proxy_tokens_used(self, count: int) -> None:
         self.tokens_served += count
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if not self._pairing:
+            return
+        if event.button.id == "copy-url-btn":
+            self.app.copy_to_clipboard(self._pairing.peer_url)
+            self.notify("Peer URL copied!")
+        elif event.button.id == "copy-key-btn":
+            self.app.copy_to_clipboard(self._pairing.temp_key)
+            self.notify("Temp key copied!")
+        elif event.button.id == "copy-code-btn":
+            snippet = _make_snippet(
+                self._pairing.peer_provider,
+                self._pairing.peer_model,
+                self._pairing.peer_url,
+                self._pairing.temp_key,
+            )
+            self.app.copy_to_clipboard(snippet)
+            self.notify("Code copied!")
 
     @work(exclusive=True)
     async def connect_and_run(self) -> None:
@@ -245,7 +357,7 @@ class StatusScreen(Screen):
                                 self.tokens_serve_limit = self._pairing.tokens_to_serve
                                 self.tokens_use_limit = self._pairing.tokens_granted
 
-                                proxy._temp_key = self._pairing.temp_key
+                                proxy._temp_key = self._pairing.proxy_key
                                 proxy._budget = self._pairing.tokens_to_serve
 
                                 self.status_text = (

@@ -121,13 +121,25 @@ class ProxyServer:
             )
         return app
 
-    async def start(self, host: str = "127.0.0.1", port: int = 9100) -> str:
+    async def start(
+        self, host: str = "127.0.0.1", port: int = 9100, max_attempts: int = 10
+    ) -> str:
         self._runner = web.AppRunner(self._create_app())
         await self._runner.setup()
-        site = web.TCPSite(self._runner, host, port)
-        await site.start()
 
-        self._tunnel_url = await asyncio.to_thread(self._create_tunnel, port)
+        for attempt in range(max_attempts):
+            try:
+                site = web.TCPSite(self._runner, host, port + attempt)
+                await site.start()
+                break
+            except OSError:
+                if attempt == max_attempts - 1:
+                    raise
+        else:
+            raise OSError(f"Could not bind to ports {port}-{port + max_attempts - 1}")
+
+        bound_port = port + attempt
+        self._tunnel_url = await asyncio.to_thread(self._create_tunnel, bound_port)
         return self._tunnel_url
 
     @staticmethod
