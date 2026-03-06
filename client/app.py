@@ -122,7 +122,11 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
             provider = str(event.value)
             models = PROVIDERS.get(provider, [])
             model_select = self.query_one("#want-model-select", Select)
-            model_select.set_options([(m, m) for m in models if m != self.model])
+            if provider == self.provider:
+                options = [(m, m) for m in models if m != self.model]
+            else:
+                options = [(m, m) for m in models]
+            model_select.set_options(options)
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         if event.switch.id == "advanced-switch":
