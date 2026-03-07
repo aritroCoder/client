@@ -209,9 +209,9 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
         model_select = self.query_one("#want-model-select", Select)
 
         try:
-            models, source = await self._fetch_live_copilot_models_for_want()
+            models = await self._fetch_live_copilot_models_for_want()
         except Exception:
-            models, source = [], "none"
+            models = []
 
         current_provider = provider_select.value
         if (
@@ -236,7 +236,7 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
             severity="warning",
         )
 
-    async def _fetch_live_copilot_models_for_want(self) -> tuple[list[str], str]:
+    async def _fetch_live_copilot_models_for_want(self) -> list[str]:
         app = self.app
         copilot_token = getattr(app, "_copilot_token", "")
         github_token = getattr(app, "_github_token", "")
@@ -245,7 +245,7 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
             try:
                 models = await fetch_copilot_models(copilot_token)
                 if models:
-                    return models, "authenticated"
+                    return models
             except Exception as e:
                 self.log(f"Copilot model fetch with cached token failed: {e}")
 
@@ -256,15 +256,15 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
                 setattr(app, "_github_token", refreshed.github_token)
                 models = await fetch_copilot_models(refreshed.copilot_token)
                 if models:
-                    return models, "authenticated"
+                    return models
             except Exception as e:
                 self.log(f"Copilot model fetch after refresh failed: {e}")
 
         public_models = await fetch_public_copilot_models()
         if public_models:
-            return public_models, "public"
+            return public_models
 
-        return [], "none"
+        return []
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         if event.switch.id == "advanced-switch":
@@ -399,6 +399,7 @@ class CopilotAuthScreen(Screen[tuple[str, str]]):
                 variant="primary",
             )
             yield Static("", id="copilot-status", classes="status-text")
+            yield Button("← Back", id="copilot-back-btn", variant="default")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -454,6 +455,9 @@ class CopilotAuthScreen(Screen[tuple[str, str]]):
         if event.button.id == "open-browser-btn":
             uri = getattr(self, "_verification_uri", "https://github.com/login/device")
             webbrowser.open(uri)
+        elif event.button.id == "copilot-back-btn":
+            self.workers.cancel_all()
+            self.dismiss(None)
 
 
 class CopilotModelScreen(Screen[str]):
@@ -770,8 +774,6 @@ class StatusScreen(Screen[None]):
             input_budget=0,
             output_budget=0,
             on_tokens_served=self.on_proxy_tokens_served,
-            auth_method=self.config.auth_method,
-            github_token=self.config.github_token,
         )
 
         refresh_task: asyncio.Task[None] | None = None
@@ -954,6 +956,7 @@ class TokenHubApp(App[None]):
 
     def on_copilot_authenticated(self, result: tuple[str, str] | None) -> None:
         if result is None:
+            self.push_screen(AuthChoiceScreen(), callback=self.on_auth_choice)
             return
         self._copilot_token, self._github_token = result
         self._provider = "github-copilot"

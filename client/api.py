@@ -44,15 +44,20 @@ PROVIDER_CONFIG: dict[str, _ProviderCfg] = {
 }
 
 
-async def validate_key(provider: str, api_key: str) -> tuple[bool, str]:
+def _build_auth_headers(provider: str, api_key: str) -> dict[str, str]:
     config = PROVIDER_CONFIG[provider]
     auth_header: str = config["auth_header"]
     auth_prefix: str = config["auth_prefix"]
     extra_headers: dict[str, str] = config["extra_headers"]
-    headers: dict[str, str] = {
+    return {
         auth_header: auth_prefix + api_key,
         **extra_headers,
     }
+
+
+async def validate_key(provider: str, api_key: str) -> tuple[bool, str]:
+    config = PROVIDER_CONFIG[provider]
+    headers = _build_auth_headers(provider, api_key)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
@@ -97,14 +102,7 @@ async def fetch_provider_models(provider: str, api_key: str) -> tuple[list[str],
         return [], "Live model fetch is only available for API key providers"
 
     config = PROVIDER_CONFIG[provider]
-    auth_header: str = config["auth_header"]
-    auth_prefix: str = config["auth_prefix"]
-    extra_headers: dict[str, str] = config["extra_headers"]
-
-    headers: dict[str, str] = {
-        auth_header: auth_prefix + api_key,
-        **extra_headers,
-    }
+    headers = _build_auth_headers(provider, api_key)
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         try:
@@ -116,8 +114,7 @@ async def fetch_provider_models(provider: str, api_key: str) -> tuple[list[str],
             elif provider == "gemini":
                 resp = await client.get(
                     f"{config['base_url']}/v1beta/models",
-                    params={"key": api_key},
-                    headers=extra_headers,
+                    headers=headers,
                 )
             else:
                 resp = await client.get(

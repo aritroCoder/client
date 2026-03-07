@@ -23,8 +23,6 @@ class ProxyServer:
         input_budget: int = 0,
         output_budget: int = 0,
         on_tokens_served: Callable[[int, int], Awaitable[None]] | None = None,
-        auth_method: str = "api_key",
-        github_token: str = "",
     ) -> None:
         self._provider = provider
         self._model = model
@@ -38,8 +36,6 @@ class ProxyServer:
         self._total_served = 0
         self._advanced = input_budget > 0 or output_budget > 0
         self._on_tokens_served = on_tokens_served
-        self._auth_method = auth_method
-        self._github_token = github_token
         self._runner: web.AppRunner | None = None
         self._tunnel_url: str | None = None
 
