@@ -1,6 +1,10 @@
 import httpx
-from client.providers.utils import ProviderCfg, build_auth_headers
-from client.providers.openai.utils import extract_public_openai_models
+from client.providers.utils import (
+    ProviderCfg,
+    build_auth_headers,
+    fetch_server_supported_models,
+    intersect_preserving_order,
+)
 
 
 class OpenAIProvider:
@@ -12,34 +16,9 @@ class OpenAIProvider:
             "auth_prefix": "Bearer ",
             "extra_headers": {},
         }
-        self.PUBLIC_MODELS_URL = "https://platform.openai.com/docs/models"
-        self.PUBLIC_MODEL_PATTERN = (
-            r"\b(?:gpt-[a-z0-9][a-z0-9.\-]*|o[0-9]+(?:-[a-z0-9.\-]+)?)\b"
-        )
 
     async def fetch_public_provider_models(self) -> tuple[list[str], str]:
-        if not self.PUBLIC_MODELS_URL:
-            return [], "Public model fetch is only available for known providers"
-
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-            try:
-                resp = await client.get(
-                    self.PUBLIC_MODELS_URL,
-                    headers={
-                        "Accept": "text/html",
-                        "User-Agent": "Mozilla/5.0 (TokenHub)",
-                    },
-                )
-            except httpx.RequestError as e:
-                return [], f"Network error: {e}"
-
-        if resp.status_code != 200:
-            return [], f"Public model fetch failed (HTTP {resp.status_code})"
-
-        models = extract_public_openai_models(resp.text, self.PUBLIC_MODEL_PATTERN)
-        if not models:
-            return [], "No public models found"
-        return models, "OK"
+        return await fetch_server_supported_models(self.provider)
 
     async def validate_key(self, api_key: str) -> tuple[bool, str]:
         config = self.PROVIDER_CONFIG
@@ -96,4 +75,14 @@ class OpenAIProvider:
         if not models:
             return [], "No models returned by provider"
 
-        return models, "OK"
+        supported_models, supported_status = await fetch_server_supported_models(
+            self.provider
+        )
+        if not supported_models:
+            return [], supported_status
+
+        filtered_models = intersect_preserving_order(models, supported_models)
+        if not filtered_models:
+            return [], "No provider models supported by server"
+
+        return filtered_models, "OK"

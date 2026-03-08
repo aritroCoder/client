@@ -26,7 +26,6 @@ from textual import work
 from client.api import fetch_provider_models, fetch_public_provider_models, validate_key
 from client.providers.github_copilot.provider import github_copilot_provider
 from client.models import (
-    COPILOT_MODELS_FALLBACK,
     PROVIDERS,
     ExchangeConfig,
     PairingInfo,
@@ -58,11 +57,41 @@ class ProviderScreen(Screen[tuple[str, str, str]]):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "provider-select" and event.value != Select.BLANK:
             provider = str(event.value)
-            models = PROVIDERS.get(provider, [])
             model_select = self.query_one("#model-select", Select)
-            model_select.set_options([(m, m) for m in models])
+            model_select.set_options(
+                [("Loading supported models...", "__provider_models_loading__")]
+            )
             model_select.clear()
-            self.query_one("#provider-model-status", Static).update("")
+            self.query_one("#provider-model-status", Static).update(
+                "Loading server-supported models..."
+            )
+            self._load_supported_provider_models(provider)
+
+    @work(exclusive=True)
+    async def _load_supported_provider_models(self, provider: str) -> None:
+        provider_select = self.query_one("#provider-select", Select)
+        model_select = self.query_one("#model-select", Select)
+        status = self.query_one("#provider-model-status", Static)
+
+        models, message = await fetch_public_provider_models(provider)
+
+        current_provider = provider_select.value
+        if current_provider == Select.BLANK or str(current_provider) != provider:
+            return
+
+        if not models:
+            model_select.set_options([])
+            model_select.clear()
+            status.update(message)
+            self.notify(
+                f"Could not load server-supported models for {provider}: {message}",
+                severity="error",
+            )
+            return
+
+        model_select.set_options([(m, m) for m in models])
+        model_select.clear()
+        status.update(f"Loaded {len(models)} server-supported models")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "fetch-models-btn":
@@ -73,6 +102,9 @@ class ProviderScreen(Screen[tuple[str, str, str]]):
         model = self.query_one("#model-select", Select).value
         if provider == Select.BLANK or model == Select.BLANK:
             self.notify("Select both provider and model", severity="error")
+            return
+        if model == "__provider_models_loading__":
+            self.notify("Provider models are still loading", severity="error")
             return
         provider_key = self.query_one("#provider-key-input", Input).value.strip()
         self.dismiss((str(provider), str(model), provider_key))
@@ -106,10 +138,20 @@ class ProviderScreen(Screen[tuple[str, str, str]]):
             status.update(f"Loaded {len(models)} live models")
             return
 
-        fallback = PROVIDERS.get(provider_name, [])
-        model_select.set_options([(m, m) for m in fallback])
+        fallback, fallback_status = await fetch_public_provider_models(provider_name)
+        if fallback:
+            model_select.set_options([(m, m) for m in fallback])
+            model_select.clear()
+            status.update(
+                f"{message}. Using server-supported model list ({len(fallback)} models)."
+            )
+            return
+
+        model_select.set_options([])
         model_select.clear()
-        status.update(f"{message}. Using bundled model list.")
+        status.update(
+            f"{message}. Could not load server-supported model list ({fallback_status})."
+        )
 
 
 class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
@@ -206,16 +248,18 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
             return
 
         if not models:
-            models = list(PROVIDERS.get(provider, []))
             self.notify(
-                f"Using bundled fallback model list for {provider} ({status})",
-                severity="warning",
+                f"Could not load server-supported model list for {provider}: {status}",
+                severity="error",
             )
-        else:
-            self.notify(
-                f"Loaded {len(models)} public {provider} models",
-                severity="information",
-            )
+            model_select.set_options([])
+            model_select.clear()
+            return
+
+        self.notify(
+            f"Loaded {len(models)} server-supported {provider} models",
+            severity="information",
+        )
 
         if provider == self.provider:
             models = [m for m in models if m != self.model]
@@ -249,11 +293,11 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
             )
             return
 
-        model_select.set_options([(m, m) for m in COPILOT_MODELS_FALLBACK])
+        model_select.set_options([])
         model_select.clear()
         self.notify(
-            "Using bundled fallback Copilot model list",
-            severity="warning",
+            "Could not load supported Copilot models",
+            severity="error",
         )
 
     async def _fetch_live_copilot_models_for_want(self) -> list[str]:
@@ -263,9 +307,7 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
 
         if copilot_token:
             try:
-                models = await github_copilot_provider.fetch_copilot_models(
-                    copilot_token
-                )
+                models, _ = await fetch_provider_models("github-copilot", copilot_token)
                 if models:
                     return models
             except Exception as e:
@@ -278,8 +320,8 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
                 )
                 setattr(app, "_copilot_token", refreshed.copilot_token)
                 setattr(app, "_github_token", refreshed.github_token)
-                models = await github_copilot_provider.fetch_copilot_models(
-                    refreshed.copilot_token
+                models, _ = await fetch_provider_models(
+                    "github-copilot", refreshed.copilot_token
                 )
                 if models:
                     return models
@@ -517,17 +559,23 @@ class CopilotModelScreen(Screen[str]):
         next_btn = self.query_one("#next-btn", Button)
 
         try:
-            models = await github_copilot_provider.fetch_copilot_models(
-                self.copilot_token
+            models, _ = await fetch_provider_models(
+                "github-copilot", self.copilot_token
             )
             if not models:
-                models = list(COPILOT_MODELS_FALLBACK)
-                status.update("Using default model list")
+                models, message = await fetch_public_provider_models("github-copilot")
+                if not models:
+                    status.update(message)
+                    return
+                status.update("Using server-supported model list")
             else:
                 status.update(f"Found {len(models)} models")
         except Exception:
-            models = list(COPILOT_MODELS_FALLBACK)
-            status.update("Could not fetch models, using defaults")
+            models, message = await fetch_public_provider_models("github-copilot")
+            if not models:
+                status.update(f"Could not fetch models: {message}")
+                return
+            status.update("Could not fetch live models, using server-supported list")
 
         model_select.set_options([(m, m) for m in models])
         model_select.display = True

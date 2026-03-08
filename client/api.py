@@ -1,11 +1,10 @@
-import httpx
 from typing import Protocol
 
 from client.providers.anthropic.provider import AnthropicProvider
 from client.providers.gemini.provider import GeminiProvider
 from client.providers.github_copilot.provider import github_copilot_provider
 from client.providers.openai.provider import OpenAIProvider
-from client.providers.utils import ProviderCfg, build_auth_headers
+from client.providers.utils import ProviderCfg
 
 _OPENAI_PROVIDER = OpenAIProvider()
 _ANTHROPIC_PROVIDER = AnthropicProvider()
@@ -26,6 +25,7 @@ _API_KEY_PROVIDER_IMPLS: dict[str, _ApiKeyProvider] = {
     "openai": _OPENAI_PROVIDER,
     "anthropic": _ANTHROPIC_PROVIDER,
     "gemini": _GEMINI_PROVIDER,
+    "github-copilot": github_copilot_provider,
 }
 
 PROVIDER_CONFIG: dict[str, ProviderCfg] = {
@@ -44,9 +44,6 @@ async def fetch_public_provider_models(provider: str) -> tuple[list[str], str]:
 
 
 async def validate_key(provider: str, api_key: str) -> tuple[bool, str]:
-    if provider == "github-copilot":
-        return await github_copilot_provider.validate_key(api_key)
-
     impl = _API_KEY_PROVIDER_IMPLS.get(provider)
     if impl is None:
         return False, f"Validation failed (unknown provider: {provider})"
