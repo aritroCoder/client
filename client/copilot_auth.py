@@ -20,6 +20,10 @@ COPILOT_SUPPORTED_MODELS_DOCS_URL = (
     "https://docs.github.com/en/copilot/reference/ai-models/supported-models"
 )
 
+_PUBLIC_MODEL_NAME_ALIASES: dict[str, str] = {
+    "claude opus 4.6 fast mode": "claude-opus-4.6",
+}
+
 
 @dataclass
 class DeviceCode:
@@ -153,6 +157,7 @@ async def refresh_copilot_token(github_token: str) -> CopilotToken:
 
 
 async def fetch_copilot_models(copilot_token: str) -> list[str]:
+    # fetch copilot models (authenticated endpoint)
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             "https://api.githubcopilot.com/models",
@@ -177,6 +182,29 @@ async def fetch_copilot_models(copilot_token: str) -> list[str]:
             if model_id:
                 models.append(model_id)
         return models
+
+
+def _canonicalize_public_copilot_model_name(name: str) -> str | None:
+    text = html.unescape(name)
+    text = re.sub(r"\[[^\]]*\]", "", text)
+    text = re.sub(r"\([^)]*\)", "", text)
+    text = text.strip().lower()
+    if not text:
+        return None
+
+    text = re.sub(r"[\u2010\u2011\u2012\u2013\u2014\u2015]", "-", text)
+    text = re.sub(r"\s+", " ", text)
+    if text in _PUBLIC_MODEL_NAME_ALIASES:
+        return _PUBLIC_MODEL_NAME_ALIASES[text]
+
+    text = text.replace("/", " ").replace("_", " ")
+    text = re.sub(r"[^a-z0-9.\-\s]", "", text)
+    text = re.sub(r"\s+", "-", text)
+    text = re.sub(r"-+", "-", text).strip("-")
+    if not text:
+        return None
+
+    return text
 
 
 async def fetch_public_copilot_models() -> list[str]:
@@ -204,10 +232,10 @@ async def fetch_public_copilot_models() -> list[str]:
     models: list[str] = []
     seen: set[str] = set()
     for name in names:
-        normalized = html.unescape(name).strip()
-        if not normalized or normalized in seen:
+        canonical = _canonicalize_public_copilot_model_name(name)
+        if not canonical or canonical in seen:
             continue
-        seen.add(normalized)
-        models.append(normalized)
+        seen.add(canonical)
+        models.append(canonical)
 
     return models

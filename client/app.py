@@ -23,7 +23,7 @@ from textual.widgets import (
 )
 from textual import work
 
-from client.api import fetch_provider_models, validate_key
+from client.api import fetch_provider_models, fetch_public_provider_models, validate_key
 from client.copilot_auth import (
     exchange_for_copilot_token,
     fetch_copilot_models,
@@ -191,17 +191,44 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
                 self._load_copilot_want_models()
                 return
 
-            all_want_providers = {
-                **PROVIDERS,
-                "github-copilot": COPILOT_MODELS_FALLBACK,
-            }
-            models = all_want_providers.get(provider, [])
-            if provider == self.provider:
-              options = [(m, m) for m in models if m != self.model]
-            else:
-              options = [(m, m) for m in models]
-            model_select.set_options([(m, m) for m in models])
+            model_select.set_options(
+                [("Loading public models...", "__want_models_loading__")]
+            )
             model_select.clear()
+            self._load_public_want_models(provider)
+
+    @work(exclusive=True)
+    async def _load_public_want_models(self, provider: str) -> None:
+        provider_select = self.query_one("#want-provider-select", Select)
+        model_select = self.query_one("#want-model-select", Select)
+
+        try:
+            models, status = await fetch_public_provider_models(provider)
+        except Exception:
+            models = []
+            status = "Public model fetch failed"
+
+        current_provider = provider_select.value
+        if current_provider == Select.BLANK or str(current_provider) != provider:
+            return
+
+        if not models:
+            models = list(PROVIDERS.get(provider, []))
+            self.notify(
+                f"Using bundled fallback model list for {provider} ({status})",
+                severity="warning",
+            )
+        else:
+            self.notify(
+                f"Loaded {len(models)} public {provider} models",
+                severity="information",
+            )
+
+        if provider == self.provider:
+            models = [m for m in models if m != self.model]
+
+        model_select.set_options([(m, m) for m in models])
+        model_select.clear()
 
     @work(exclusive=True)
     async def _load_copilot_want_models(self) -> None:
@@ -283,6 +310,9 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
             return
         if want_model == "__copilot_models_loading__":
             self.notify("Copilot models are still loading", severity="error")
+            return
+        if want_model == "__want_models_loading__":
+            self.notify("Provider models are still loading", severity="error")
             return
         want_provider_str = str(want_provider)
         want_model_str = str(want_model)
