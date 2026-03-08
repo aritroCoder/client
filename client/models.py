@@ -2,48 +2,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-PROVIDERS = {
-    "openai": [
-        "gpt-5.2",
-        "gpt-5.2-pro",
-        "gpt-5.3-codex",
-        "gpt-5-mini",
-        "gpt-4.1",
-        "gpt-4.1-mini",
-        "gpt-4.1-nano",
-        "o3",
-        "o4-mini",
-    ],
-    "anthropic": [
-        "claude-opus-4-6",
-        "claude-sonnet-4-6",
-        "claude-haiku-4-5",
-        "claude-sonnet-4-5",
-        "claude-opus-4-5",
-    ],
-    "gemini": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
-    ],
-}
-
-# Fallback model list for github-copilot when dynamic fetch fails
-# or when selecting github-copilot as the "want" provider
-COPILOT_MODELS_FALLBACK = [
-    "gpt-4o",
-    "gpt-4o-mini",
-    "gpt-4.1",
-    "gpt-4.1-mini",
-    "gpt-4.1-nano",
-    "o4-mini",
-    "o3-mini",
-    "claude-sonnet-4",
-    "claude-3.5-sonnet",
-    "gemini-2.0-flash-001",
+# Providers list for share and want provider dropdowns
+PROVIDERS = [
+    "openai",
+    "anthropic",
+    "gemini",
+    "github-copilot",
 ]
 
 
