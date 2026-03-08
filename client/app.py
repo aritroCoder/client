@@ -24,14 +24,7 @@ from textual.widgets import (
 from textual import work
 
 from client.api import fetch_provider_models, fetch_public_provider_models, validate_key
-from client.copilot_auth import (
-    exchange_for_copilot_token,
-    fetch_copilot_models,
-    fetch_public_copilot_models,
-    poll_for_access_token,
-    refresh_copilot_token,
-    request_device_code,
-)
+from client.providers.github_copilot.provider import github_copilot_provider
 from client.models import (
     COPILOT_MODELS_FALLBACK,
     PROVIDERS,
@@ -270,7 +263,9 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
 
         if copilot_token:
             try:
-                models = await fetch_copilot_models(copilot_token)
+                models = await github_copilot_provider.fetch_copilot_models(
+                    copilot_token
+                )
                 if models:
                     return models
             except Exception as e:
@@ -278,16 +273,20 @@ class ExchangeScreen(Screen[tuple[int, str, str, bool, int, int]]):
 
         if github_token:
             try:
-                refreshed = await refresh_copilot_token(github_token)
+                refreshed = await github_copilot_provider.refresh_copilot_token(
+                    github_token
+                )
                 setattr(app, "_copilot_token", refreshed.copilot_token)
                 setattr(app, "_github_token", refreshed.github_token)
-                models = await fetch_copilot_models(refreshed.copilot_token)
+                models = await github_copilot_provider.fetch_copilot_models(
+                    refreshed.copilot_token
+                )
                 if models:
                     return models
             except Exception as e:
                 self.log(f"Copilot model fetch after refresh failed: {e}")
 
-        public_models = await fetch_public_copilot_models()
+        public_models = await github_copilot_provider.fetch_public_copilot_models()
         if public_models:
             return public_models
 
@@ -442,7 +441,7 @@ class CopilotAuthScreen(Screen[tuple[str, str]]):
     @work(exclusive=True)
     async def start_device_flow(self) -> None:
         try:
-            device = await request_device_code()
+            device = await github_copilot_provider.request_device_code()
 
             instructions = self.query_one("#copilot-instructions", Static)
             code_display = self.query_one("#copilot-code", Static)
@@ -457,14 +456,16 @@ class CopilotAuthScreen(Screen[tuple[str, str]]):
             self._verification_uri = device.verification_uri
             status.update("Waiting for authorization...")
 
-            github_token = await poll_for_access_token(
+            github_token = await github_copilot_provider.poll_for_access_token(
                 device.device_code,
                 interval=device.interval,
                 expires_in=device.expires_in,
             )
 
             status.update("Exchanging for Copilot token...")
-            copilot = await exchange_for_copilot_token(github_token)
+            copilot = await github_copilot_provider.exchange_for_copilot_token(
+                github_token
+            )
 
             status.update("[green]Authenticated![/]")
             await asyncio.sleep(0.5)
@@ -516,7 +517,9 @@ class CopilotModelScreen(Screen[str]):
         next_btn = self.query_one("#next-btn", Button)
 
         try:
-            models = await fetch_copilot_models(self.copilot_token)
+            models = await github_copilot_provider.fetch_copilot_models(
+                self.copilot_token
+            )
             if not models:
                 models = list(COPILOT_MODELS_FALLBACK)
                 status.update("Using default model list")
@@ -900,7 +903,9 @@ class StatusScreen(Screen[None]):
             if not self.config.github_token:
                 break
             try:
-                copilot = await refresh_copilot_token(self.config.github_token)
+                copilot = await github_copilot_provider.refresh_copilot_token(
+                    self.config.github_token
+                )
                 proxy._api_key = copilot.copilot_token
                 self.config.api_key = copilot.copilot_token
             except Exception:
