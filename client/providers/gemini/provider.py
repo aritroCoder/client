@@ -1,21 +1,23 @@
 import httpx
+
+from client.providers.gemini.utils import (
+    extract_gemini_models_from_payload,
+    extract_public_gemini_models,
+)
 from client.providers.utils import ProviderCfg, build_auth_headers
-from client.providers.openai.utils import extract_public_openai_models
 
 
-class OpenAIProvider:
-    def __init__(self):
-        self.provider = "openai"
+class GeminiProvider:
+    def __init__(self) -> None:
+        self.provider = "gemini"
         self.PROVIDER_CONFIG: ProviderCfg = {
-            "base_url": "https://api.openai.com",
-            "auth_header": "Authorization",
-            "auth_prefix": "Bearer ",
+            "base_url": "https://generativelanguage.googleapis.com",
+            "auth_header": "x-goog-api-key",
+            "auth_prefix": "",
             "extra_headers": {},
         }
-        self.PUBLIC_MODELS_URL = "https://platform.openai.com/docs/models"
-        self.PUBLIC_MODEL_PATTERN = (
-            r"\b(?:gpt-[a-z0-9][a-z0-9.\-]*|o[0-9]+(?:-[a-z0-9.\-]+)?)\b"
-        )
+        self.PUBLIC_MODELS_URL = "https://ai.google.dev/gemini-api/docs/models"
+        self.PUBLIC_MODEL_PATTERN = r"\bgemini-[0-9][a-z0-9.\-]*\b"
 
     async def fetch_public_provider_models(self) -> tuple[list[str], str]:
         if not self.PUBLIC_MODELS_URL:
@@ -36,7 +38,7 @@ class OpenAIProvider:
         if resp.status_code != 200:
             return [], f"Public model fetch failed (HTTP {resp.status_code})"
 
-        models = extract_public_openai_models(resp.text, self.PUBLIC_MODEL_PATTERN)
+        models = extract_public_gemini_models(resp.text, self.PUBLIC_MODEL_PATTERN)
         if not models:
             return [], "No public models found"
         return models, "OK"
@@ -48,7 +50,7 @@ class OpenAIProvider:
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 resp = await client.get(
-                    f"{config['base_url']}/v1/models",
+                    f"{config['base_url']}/v1beta/models",
                     headers=headers,
                 )
                 if resp.status_code == 200:
@@ -58,17 +60,13 @@ class OpenAIProvider:
                 return False, f"Network error: {e}"
 
     async def fetch_provider_models(self, api_key: str) -> tuple[list[str], str]:
-        # fetch provider models (authenticated endpoint)
-        if self.provider not in {"openai"}:
-            return [], "Live model fetch is only available for API key providers"
-
         config = self.PROVIDER_CONFIG
         headers = build_auth_headers(config, api_key)
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             try:
                 resp = await client.get(
-                    f"{config['base_url']}/v1/models",
+                    f"{config['base_url']}/v1beta/models",
                     headers=headers,
                 )
             except httpx.RequestError as e:
@@ -84,16 +82,7 @@ class OpenAIProvider:
         except ValueError:
             return [], "Model fetch failed (invalid JSON response)"
 
-        models: list[str] = []
-        seen: set[str] = set()
-
-        for item in payload.get("data", []):
-            model_id = item.get("id")
-            if isinstance(model_id, str) and model_id and model_id not in seen:
-                seen.add(model_id)
-                models.append(model_id)
-
+        models = extract_gemini_models_from_payload(payload)
         if not models:
             return [], "No models returned by provider"
-
         return models, "OK"

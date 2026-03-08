@@ -2,7 +2,7 @@ import html
 import re
 
 
-def extract_public_openai_models(page: str, pattern: str) -> list[str]:
+def extract_public_anthropic_models(page: str, pattern: str) -> list[str]:
     text = html.unescape(page).lower()
 
     models: list[str] = []

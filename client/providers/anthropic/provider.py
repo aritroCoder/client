@@ -1,20 +1,23 @@
 import httpx
+
+from client.providers.anthropic.utils import extract_public_anthropic_models
 from client.providers.utils import ProviderCfg, build_auth_headers
-from client.providers.openai.utils import extract_public_openai_models
 
 
-class OpenAIProvider:
-    def __init__(self):
-        self.provider = "openai"
+class AnthropicProvider:
+    def __init__(self) -> None:
+        self.provider = "anthropic"
         self.PROVIDER_CONFIG: ProviderCfg = {
-            "base_url": "https://api.openai.com",
-            "auth_header": "Authorization",
-            "auth_prefix": "Bearer ",
-            "extra_headers": {},
+            "base_url": "https://api.anthropic.com",
+            "auth_header": "x-api-key",
+            "auth_prefix": "",
+            "extra_headers": {"anthropic-version": "2023-06-01"},
         }
-        self.PUBLIC_MODELS_URL = "https://platform.openai.com/docs/models"
+        self.PUBLIC_MODELS_URL = (
+            "https://docs.anthropic.com/en/docs/about-claude/models/all-models"
+        )
         self.PUBLIC_MODEL_PATTERN = (
-            r"\b(?:gpt-[a-z0-9][a-z0-9.\-]*|o[0-9]+(?:-[a-z0-9.\-]+)?)\b"
+            r"\bclaude-(?:opus|sonnet|haiku)-[0-9][a-z0-9.\-]*\b"
         )
 
     async def fetch_public_provider_models(self) -> tuple[list[str], str]:
@@ -36,7 +39,7 @@ class OpenAIProvider:
         if resp.status_code != 200:
             return [], f"Public model fetch failed (HTTP {resp.status_code})"
 
-        models = extract_public_openai_models(resp.text, self.PUBLIC_MODEL_PATTERN)
+        models = extract_public_anthropic_models(resp.text, self.PUBLIC_MODEL_PATTERN)
         if not models:
             return [], "No public models found"
         return models, "OK"
@@ -47,21 +50,22 @@ class OpenAIProvider:
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
-                resp = await client.get(
-                    f"{config['base_url']}/v1/models",
-                    headers=headers,
+                resp = await client.post(
+                    f"{config['base_url']}/v1/messages",
+                    headers={**headers, "Content-Type": "application/json"},
+                    json={
+                        "model": "claude-sonnet-4-6",
+                        "max_tokens": 1,
+                        "messages": [],
+                    },
                 )
-                if resp.status_code == 200:
-                    return True, "OK"
-                return False, f"Validation failed (HTTP {resp.status_code})"
+                if resp.status_code == 401:
+                    return False, "Invalid API key"
+                return True, "OK"
             except httpx.RequestError as e:
                 return False, f"Network error: {e}"
 
     async def fetch_provider_models(self, api_key: str) -> tuple[list[str], str]:
-        # fetch provider models (authenticated endpoint)
-        if self.provider not in {"openai"}:
-            return [], "Live model fetch is only available for API key providers"
-
         config = self.PROVIDER_CONFIG
         headers = build_auth_headers(config, api_key)
 
