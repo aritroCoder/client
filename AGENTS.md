@@ -15,7 +15,7 @@ TokenHub client — Python Textual TUI that pairs users to exchange LLM API toke
 ├── client/           # Python package (all app code lives here)
 │   ├── app.py        # TUI entry: TokenHubApp + 4 Screens (provider→exchange→key→status)
 │   ├── api.py        # Provider config (base URLs, auth headers) + key validation
-│   ├── models.py     # Dataclasses: ExchangeConfig, PairingInfo; PROVIDERS dict
+│   ├── models.py     # Dataclasses: ExchangeConfig, PairingInfo; PROVIDERS list
 │   ├── proxy.py      # Local aiohttp proxy server + ngrok tunnel + token budget tracking
 │   ├── app.tcss      # Textual CSS (layout/styling)
 │   └── __init__.py   # Package marker (empty)
@@ -27,7 +27,7 @@ TokenHub client — Python Textual TUI that pairs users to exchange LLM API toke
 
 | Task | File | Notes |
 |------|------|-------|
-| Add/change LLM provider | `client/models.py` (PROVIDERS dict) + `client/api.py` (PROVIDER_CONFIG, validate_key) + `client/proxy.py` (handler + auth + token extraction) | All three must stay in sync |
+| Add/change LLM provider | `client/models.py` (PROVIDERS list) + `client/api.py` (PROVIDER_CONFIG, validate_key) + `client/proxy.py` (handler + auth + token extraction) | Model lists are fetched dynamically from the server (`/providers/models` endpoint); all three files must stay in sync |
 | Change TUI screens/flow | `client/app.py` | Screen stack: Provider→Exchange→Key→Status. Navigation via push_screen callbacks |
 | Change proxy behavior | `client/proxy.py` | Auth verification, budget enforcement, request forwarding |
 | Change styling | `client/app.tcss` | Textual CSS |

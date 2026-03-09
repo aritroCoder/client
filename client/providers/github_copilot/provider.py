@@ -6,8 +6,12 @@ from dataclasses import dataclass
 
 import httpx
 
-from client.providers.github_copilot.utils import extract_public_copilot_models
-from client.providers.utils import ProviderCfg, build_auth_headers
+from client.providers.utils import (
+    ProviderCfg,
+    build_auth_headers,
+    fetch_server_supported_models,
+    intersect_preserving_order,
+)
 
 
 @dataclass
@@ -46,9 +50,6 @@ class GitHubCopilotProvider:
         self.github_access_token_url = "https://github.com/login/oauth/access_token"
         self.github_copilot_token_url = (
             "https://api.github.com/copilot_internal/v2/token"
-        )
-        self.public_models_url = (
-            "https://docs.github.com/en/copilot/reference/ai-models/supported-models"
         )
         self.user_agent = "GithubCopilot/1.250.0"
         self.editor_version = "vscode/1.95.0"
@@ -196,28 +197,21 @@ class GitHubCopilotProvider:
 
         if not models:
             return [], "No models returned by provider"
-        return models, "OK"
+
+        supported_models, supported_status = await fetch_server_supported_models(
+            self.provider
+        )
+        if not supported_models:
+            return [], supported_status
+
+        filtered_models = intersect_preserving_order(models, supported_models)
+        if not filtered_models:
+            return [], "No provider models supported by server"
+
+        return filtered_models, "OK"
 
     async def fetch_public_provider_models(self) -> tuple[list[str], str]:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                resp = await client.get(
-                    self.public_models_url,
-                    headers={
-                        "Accept": "text/html",
-                        "User-Agent": self.user_agent,
-                    },
-                )
-                resp.raise_for_status()
-            except httpx.RequestError as e:
-                return [], f"Network error: {e}"
-            except httpx.HTTPStatusError as e:
-                return [], f"Public model fetch failed (HTTP {e.response.status_code})"
-
-        models = extract_public_copilot_models(resp.text)
-        if not models:
-            return [], "No public models found"
-        return models, "OK"
+        return await fetch_server_supported_models(self.provider)
 
     async def fetch_public_copilot_models(self) -> list[str]:
         models, _ = await self.fetch_public_provider_models()
