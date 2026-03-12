@@ -76,9 +76,16 @@ class ProxyServer:
         if self._advanced:
             return (
                 self._input_served >= self._input_budget
-                and self._output_served >= self._output_budget
+                or self._output_served >= self._output_budget
             )
         return self._total_served >= self._total_budget
+
+    def _remaining_budget(self) -> int:
+        if self._advanced:
+            input_remaining = max(self._input_budget - self._input_served, 0)
+            output_remaining = max(self._output_budget - self._output_served, 0)
+            return input_remaining + output_remaining
+        return max(self._total_budget - self._total_served, 0)
 
     def _verify_model(self, body: bytes) -> bool:
         try:
@@ -167,6 +174,14 @@ class ProxyServer:
         }:
             headers["Content-Type"] = "application/json"
 
+        # Avoid forwarding compressed payloads that may not be decoded by httpx
+        # in all environments (for example, brotli), which can break clients
+        # when the proxy forwards bytes unchanged.
+        for key in list(headers):
+            if key.lower() == "accept-encoding":
+                del headers[key]
+        headers["Accept-Encoding"] = "identity"
+
         return headers
 
     @staticmethod
@@ -183,6 +198,9 @@ class ProxyServer:
         if not isinstance(payload, dict):
             return
         input_count, output_count = self._extract_tokens(payload, self._provider)
+        await self._record_usage_counts(input_count, output_count)
+
+    async def _record_usage_counts(self, input_count: int, output_count: int) -> None:
         if input_count <= 0 and output_count <= 0:
             return
 
@@ -195,6 +213,23 @@ class ProxyServer:
         if self._on_tokens_served:
             await self._on_tokens_served(input_count, output_count)
 
+    @staticmethod
+    def _extract_sse_payload(raw_event: bytes) -> bytes | None:
+        payload_lines: list[bytes] = []
+        for line in raw_event.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith(b"data:"):
+                continue
+            payload_lines.append(stripped[len(b"data:") :].strip())
+
+        if not payload_lines:
+            return None
+
+        payload = b"\n".join(payload_lines).strip()
+        if not payload or payload == b"[DONE]":
+            return None
+        return payload
+
     async def _stream_response(
         self,
         request: web.Request,
@@ -202,9 +237,13 @@ class ProxyServer:
         body: bytes,
         headers: dict[str, str],
     ) -> web.StreamResponse:
+        base_total_served = self._total_served
+        base_input_served = self._input_served
+        base_output_served = self._output_served
         usage_input_total = 0
         usage_output_total = 0
         usage_buffer = bytearray()
+        stream_closed_early = False
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(
@@ -226,48 +265,82 @@ class ProxyServer:
                 async for chunk in resp.aiter_bytes():
                     await stream_resp.write(chunk)
                     usage_buffer.extend(chunk)
+                    if b"\r\n" in usage_buffer:
+                        usage_buffer = usage_buffer.replace(b"\r\n", b"\n")
 
                     while b"\n\n" in usage_buffer:
                         raw_event, _, remaining = usage_buffer.partition(b"\n\n")
                         usage_buffer = bytearray(remaining)
-                        for line in raw_event.splitlines():
-                            line = line.strip()
-                            if not line.startswith(b"data:"):
-                                continue
-                            payload = line[len(b"data:") :].strip()
-                            if payload == b"[DONE]":
-                                continue
-                            try:
-                                event_json = json.loads(payload.decode("utf-8"))
-                            except (
-                                UnicodeDecodeError,
-                                json.JSONDecodeError,
-                                ValueError,
+                        payload = self._extract_sse_payload(raw_event)
+                        if payload is None:
+                            continue
+                        try:
+                            event_json = json.loads(payload.decode("utf-8"))
+                        except (
+                            UnicodeDecodeError,
+                            json.JSONDecodeError,
+                            ValueError,
+                        ):
+                            continue
+
+                        in_count, out_count = self._extract_tokens(
+                            event_json, self._provider
+                        )
+                        if in_count <= 0 and out_count <= 0:
+                            continue
+
+                        usage_input_total = max(usage_input_total, in_count)
+                        usage_output_total = max(usage_output_total, out_count)
+
+                        if self._advanced:
+                            projected_input = base_input_served + usage_input_total
+                            projected_output = base_output_served + usage_output_total
+                            if (
+                                projected_input >= self._input_budget
+                                or projected_output >= self._output_budget
                             ):
-                                continue
-                            in_count, out_count = self._extract_tokens(
-                                event_json, self._provider
+                                await stream_resp.write_eof()
+                                stream_closed_early = True
+                                break
+                        else:
+                            projected_total = (
+                                base_total_served
+                                + usage_input_total
+                                + usage_output_total
                             )
-                            usage_input_total += in_count
-                            usage_output_total += out_count
+                            if projected_total >= self._total_budget:
+                                await stream_resp.write_eof()
+                                stream_closed_early = True
+                                break
 
-                await stream_resp.write_eof()
+                        if self._remaining_budget() <= 0:
+                            await stream_resp.write_eof()
+                            stream_closed_early = True
+                            break
+                    else:
+                        continue
+                    break
 
-        if usage_input_total > 0 or usage_output_total > 0:
-            await self._record_usage(
-                {
-                    "usage": {
-                        "prompt_tokens": usage_input_total,
-                        "completion_tokens": usage_output_total,
-                        "input_tokens": usage_input_total,
-                        "output_tokens": usage_output_total,
-                    },
-                    "usageMetadata": {
-                        "promptTokenCount": usage_input_total,
-                        "candidatesTokenCount": usage_output_total,
-                    },
-                }
-            )
+                if not stream_closed_early:
+                    await stream_resp.write_eof()
+
+        if self._advanced:
+            input_remaining = max(self._input_budget - base_input_served, 0)
+            output_remaining = max(self._output_budget - base_output_served, 0)
+            usage_input_total = min(usage_input_total, input_remaining)
+            usage_output_total = min(usage_output_total, output_remaining)
+        else:
+            total_remaining = max(self._total_budget - base_total_served, 0)
+            combined_usage = usage_input_total + usage_output_total
+            if combined_usage > total_remaining:
+                overflow = combined_usage - total_remaining
+                output_reduction = min(usage_output_total, overflow)
+                usage_output_total -= output_reduction
+                overflow -= output_reduction
+                if overflow > 0:
+                    usage_input_total = max(usage_input_total - overflow, 0)
+
+        await self._record_usage_counts(usage_input_total, usage_output_total)
 
         return stream_resp
 
