@@ -19,6 +19,7 @@ from textual.widgets import (
 )
 from textual import work
 
+from client import app
 from client.providers.github_copilot.provider import github_copilot_provider
 from client.models.models import (
     ExchangeConfig,
@@ -26,6 +27,7 @@ from client.models.models import (
     UsageData,
 )
 from client.logging_config import get_logger
+from client.screens import AuthChoiceScreen
 from client.screens.ProviderScreen import ProviderScreen
 
 logger = get_logger()
@@ -278,9 +280,9 @@ class StatusScreen(Screen[None]):
                     {
                         "type": "usage_report",
                         "offer_id": self._pairing.offer_id,
-                        "tokens": self._pairing.tokens_to_serve_done,
-                        "input_tokens": self._pairing.input_tokens_to_serve_done,
-                        "output_tokens": self._pairing.output_tokens_to_serve_done,
+                        "tokens": input_count + output_count,
+                        "input_tokens": input_count,
+                        "output_tokens": output_count,
                     }
                 )
             except Exception:
@@ -333,6 +335,7 @@ class StatusScreen(Screen[None]):
         self._update_table()
 
         offer_dict = self._pairing.remaining_offer()
+        logger.debug(f"Ending pairing due to {reason}. Remaining offer: {offer_dict}")
         self._pairing = None
 
         try:
@@ -560,7 +563,14 @@ class StatusScreen(Screen[None]):
             await proxy.stop()
             if self._return_to_provider_selection:
                 app = self.app
-                app.push_screen(ProviderScreen())
+                # Reset ALL state for a clean slate
+                app._provider = ""
+                app._model = ""
+                app._want_provider = ""
+                app._want_model = ""
+                app._tokens = 0
+                # Go back to auth choice (start fresh)
+                app.push_screen(AuthChoiceScreen(), callback=app.on_auth_choice)
 
     async def _refresh_copilot_loop(self, proxy: object) -> None:
         from client.proxy import ProxyServer
