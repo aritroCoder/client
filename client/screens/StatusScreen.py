@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from typing import Protocol, cast
 
 import aiohttp
 from textual.app import ComposeResult
@@ -19,7 +20,6 @@ from textual.widgets import (
 )
 from textual import work
 
-from client import app
 from client.providers.github_copilot.provider import github_copilot_provider
 from client.models.models import (
     ExchangeConfig,
@@ -27,8 +27,11 @@ from client.models.models import (
     UsageData,
 )
 from client.logging_config import get_logger
-from client.screens import AuthChoiceScreen
-from client.screens.ProviderScreen import ProviderScreen
+
+
+class _RestartableApp(Protocol):
+    def restart_from_auth_choice(self) -> None: ...
+
 
 logger = get_logger()
 
@@ -562,15 +565,8 @@ class StatusScreen(Screen[None]):
                 refresh_task.cancel()
             await proxy.stop()
             if self._return_to_provider_selection:
-                app = self.app
-                # Reset ALL state for a clean slate
-                app._provider = ""
-                app._model = ""
-                app._want_provider = ""
-                app._want_model = ""
-                app._tokens = 0
-                # Go back to auth choice (start fresh)
-                app.push_screen(AuthChoiceScreen(), callback=app.on_auth_choice)
+                tokenhub_app = cast(_RestartableApp, cast(object, self.app))
+                tokenhub_app.restart_from_auth_choice()
 
     async def _refresh_copilot_loop(self, proxy: object) -> None:
         from client.proxy import ProxyServer

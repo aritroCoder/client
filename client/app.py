@@ -18,6 +18,7 @@ from client.screens.CopilotModelScreen import CopilotModelScreen
 
 logger = get_logger(__name__)
 
+
 class TokenHubApp(App[None]):
     CSS_PATH = "app.tcss"
     TITLE = "TokenHub"
@@ -39,6 +40,25 @@ class TokenHubApp(App[None]):
         self._github_token: str = ""
 
     def on_mount(self) -> None:
+        self.push_screen(AuthChoiceScreen(), callback=self.on_auth_choice)
+
+    def reset_flow_state(self) -> None:
+        self._provider = ""
+        self._model = ""
+        self._api_key_prefill = ""
+        self._tokens = 0
+        self._want_provider = ""
+        self._want_model = ""
+        self._advanced = False
+        self._input_tokens = 0
+        self._output_tokens = 0
+        self._auth_method = "api_key"
+        self._copilot_token = ""
+        self._github_token = ""
+
+    def restart_from_auth_choice(self) -> None:
+        self.reset_flow_state()
+        _ = self.pop_screen()
         self.push_screen(AuthChoiceScreen(), callback=self.on_auth_choice)
 
     def on_auth_choice(self, choice: str | None) -> None:
